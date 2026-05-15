@@ -1,55 +1,26 @@
-<!DOCTYPE html>
-<html lang="ru">
-<head>
-    <meta charset="UTF-8">
-    <title>Crypto Scanner | Ping-Pong</title>
-    <style>
-        body { background-color: #121212; color: #ffffff; font-family: monospace; padding: 20px; }
-        .header { border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; }
-        .tab.active { background-color: #00ffcc; color: #000; padding: 10px 20px; border-radius: 5px; font-weight: bold; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #333; padding: 12px; text-align: left; }
-        th { background-color: #1a1a1a; color: #888; }
-        .status-online { color: #00ffcc; font-size: 0.8em; font-weight: bold; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <div class="tab active">Ping-Pong (BingX)</div>
-        <div id="api-status" class="status-online">CONNECTING TO API...</div>
-    </div>
+from flask import Flask, jsonify
+from flask_cors import CORS
+import ccxt
 
-    <table>
-        <thead>
-            <tr>
-                <th>Тикер</th><th>Спред (%)</th><th>Покупка (Низ)</th><th>Продажа (Верх)</th><th>Касаний</th><th>Объем ($)</th>
-            </tr>
-        </thead>
-        <tbody id="data-table"></tbody>
-    </table>
+app = Flask(__name__)
+# Разрешаем твоему сайту на GitHub получать данные отсюда
+CORS(app) 
 
-    <script>
-        // https://ping-pong-backend-yhro.onrender.com /api/ping-pong !!!
-       const API_URL = "https://ping-pong-backend-yhro.onrender.com/api/ping-pong";
-        async function updateData() {
-            try {
-                const response = await fetch(API_URL);
-                const data = await response.json();
-                const tableBody = document.getElementById('data-table');
-                
-                tableBody.innerHTML = '';
-                data.forEach(row => {
-                    tableBody.innerHTML += `<tr><td>${row.ticker}</td><td>${row.spread}</td><td>${row.low}</td><td>${row.high}</td><td>${row.hits}</td><td>${row.vol}</td></tr>`;
-                });
-                document.getElementById('api-status').innerText = "STATUS: [SYSTEM_ONLINE]";
-                document.getElementById('api-status').style.color = "#00ffcc";
-            } catch (error) {
-                document.getElementById('api-status').innerText = "STATUS: [CONNECTION_ERROR]";
-                document.getElementById('api-status').style.color = "red";
-            }
-        }
-        updateData();
-        setInterval(updateData, 5000);
-    </script>
-</body>
-</html>
+# Инициализация BingX
+exchange = ccxt.bingx({'enableRateLimit': True})
+
+@app.route('/')
+def home():
+    return "[SYSTEM_OFFLINE] Ping-Pong Scanner API is running."
+
+@app.route('/api/ping-pong')
+def get_ping_pong_data():
+    # Тестовые данные. Как только всё зазеленеет, напишем сюда реальный парсер стакана.
+    data = [
+        {"ticker": "CHILLHOUSE/USDT", "spread": "8.5%", "low": "0.02428", "high": "0.02679", "hits": 6, "vol": "$1,200"},
+        {"ticker": "NUMI/USDT", "spread": "4.1%", "low": "0.0575", "high": "0.0598", "hits": 3, "vol": "$500"}
+    ]
+    return jsonify(data)
+
+if __name__ == '__main__':
+    app.run(host='0.0.0.0', port=10000)
