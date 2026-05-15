@@ -30,7 +30,7 @@
 
     <script>
         // https://ping-pong-backend-yhro.onrender.com /api/ping-pong !!!
-        const API_URL = "https://https://ping-pong-backend-yhro.onrender.com
+       const API_URL = "https://ping-pong-backend-yhro.onrender.com/api/ping-pong";
         async function updateData() {
             try {
                 const response = await fetch(API_URL);
