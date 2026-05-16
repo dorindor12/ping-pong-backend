@@ -12,9 +12,7 @@ exchange = ccxt.bingx({
     'options': {'defaultType': 'spot'}
 })
 
-# Изначально база пустая
 latest_results = []
-# Флаги для безопасного запуска потока внутри активного воркера
 scanner_started = False
 lock = threading.Lock()
 
@@ -32,7 +30,7 @@ def scan_market():
                         symbols_to_check.append(symbol)
             
             total_coins = len(symbols_to_check)
-            print(f"[РАДАР] Найдено {total_coins} неликвидных пар. Начинаю анализ стаканов...", flush=True)
+            print(f"[РАДАР] Найдено {total_coins} неликвидных пар. Анализируем...", flush=True)
             live_results = []
             
             for i, symbol in enumerate(symbols_to_check):
@@ -55,17 +53,44 @@ def scan_market():
                     if best_bid_wall and best_ask_wall:
                         spread = ((best_ask_wall - best_bid_wall) / best_bid_wall) * 100
                         if spread >= 1.5:
-                            print(f"💰 НАЙДЕН СПРЕД! {symbol} - {spread:.2f}%", flush=True)
+                            
+                            # === СНАЙПЕРСКАЯ ПРОВЕРКА (1м / 5м / 15м) ===
+                            trades_activity = "~"
+                            try:
+                                # Берем 100 последних сделок
+                                trades = exchange.fetch_trades(symbol, limit=100)
+                                current_time_ms = int(time.time() * 1000)
+                                
+                                count_1m = 0
+                                count_5m = 0
+                                count_15m = 0
+                                
+                                for t in trades:
+                                    if t['timestamp']:
+                                        diff = current_time_ms - t['timestamp']
+                                        if diff <= 60000:       # 1 минута
+                                            count_1m += 1
+                                        if diff <= 300000:      # 5 минут
+                                            count_5m += 1
+                                        if diff <= 900000:      # 15 минут
+                                            count_15m += 1
+                                            
+                                trades_activity = f"{count_1m} / {count_5m} / {count_15m}"
+                            except Exception as e:
+                                pass
+                            # ============================================
+
+                            print(f"💰 {symbol} | Спред: {spread:.2f}% | Сделок: {trades_activity}", flush=True)
+                            
                             live_results.append({
                                 "ticker": symbol,
                                 "spread": f"{spread:.2f}%",
                                 "low": best_bid_wall,
                                 "high": best_ask_wall,
-                                "hits": "~",
+                                "hits": trades_activity, 
                                 "vol": f"> ${MIN_WALL_USD}"
                             })
                     
-                    # Живое обновление данных в процессе круга
                     if live_results:
                         latest_results = sorted(live_results, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
@@ -83,13 +108,12 @@ def scan_market():
             if not live_results:
                  latest_results = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
             
-            print(f"[РАДАР] Круг полностью завершен! Спим 15 сек...", flush=True)
+            print(f"[РАДАР] Круг завершен! Найдено {len(live_results)} монет. Спим 15 сек...", flush=True)
             time.sleep(15)
             
         except Exception as e:
-            print(f"[РАДАР] Глобальная ошибка в потоке: {e}", flush=True)
+            print(f"[РАДАР] Глобальная ошибка: {e}", flush=True)
             time.sleep(15)
-
 
 @app.route('/')
 def home():
@@ -98,22 +122,15 @@ def home():
 @app.route('/api/ping-pong')
 def get_ping_pong_data():
     global scanner_started
-    
-    # ХИТРОСТЬ: Запускаем поток радара строго внутри процесса, который принял запрос от сайта
     if not scanner_started:
         with lock:
             if not scanner_started:
-                print("[СЕРВЕР] Принят первый запрос от сайта. Запускаю радар внутри рабочего воркера...", flush=True)
                 scanner_thread = threading.Thread(target=scan_market, daemon=True)
                 scanner_thread.start()
                 scanner_started = True
 
-    # Если радар только запустился и еще не успел переписать пустой массив
     if not latest_results:
-         return jsonify([{
-            "ticker": "ИНИЦИАЛИЗАЦИЯ РАДАРА...",
-            "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"
-        }])
+         return jsonify([{"ticker": "ИНИЦИАЛИЗАЦИЯ РАДАРА...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}])
         
     return jsonify(latest_results)
 
