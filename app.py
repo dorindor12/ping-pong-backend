@@ -7,16 +7,18 @@ import threading
 app = Flask(__name__)
 CORS(app)
 
-# Подключаем две биржи
+# Подключаем ТРИ биржи
 exchanges = {
     'bingx': ccxt.bingx({'enableRateLimit': True, 'options': {'defaultType': 'spot'}}),
-    'bitget': ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'spot'}})
+    'bitget': ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'spot'}}),
+    'mexc': ccxt.mexc({'enableRateLimit': True, 'options': {'defaultType': 'spot'}})
 }
 
 # Раздельная память для каждой биржи
 latest_data = {
     'bingx': {'ping_pong': [], 'densities': []},
-    'bitget': {'ping_pong': [], 'densities': []}
+    'bitget': {'ping_pong': [], 'densities': []},
+    'mexc': {'ping_pong': [], 'densities': []}
 }
 
 scanner_started = False
@@ -55,13 +57,11 @@ def scan_market(ex_name):
                         
                     current_price = (bids[0][0] + asks[0][0]) / 2
 
-                    # --- АНАЛИЗ ПЕРЕКОСА СТАКАНА ---
                     total_bid_vol = sum((p * a) for p, a in bids)
                     total_ask_vol = sum((p * a) for p, a in asks)
                     total_vol = total_bid_vol + total_ask_vol
                     bid_pct = int((total_bid_vol / total_vol) * 100) if total_vol > 0 else 50
 
-                    # --- ПЛОТНОСТИ ---
                     DENSITY_MIN_USD = 5000
                     for price, amount in bids:
                         vol_usd = price * amount
@@ -75,7 +75,6 @@ def scan_market(ex_name):
                             dist = ((price - current_price) / current_price) * 100
                             live_densities.append({"ticker": symbol, "type": "SHORT", "price": price, "vol": int(vol_usd), "dist": f"{dist:.2f}%"})
 
-                    # --- ПИНГ-ПОНГ ---
                     PP_MIN_WALL = 300 
                     best_bid_wall = next((p for p, a in bids if (p * a) >= PP_MIN_WALL), None)
                     best_ask_wall = next((p for p, a in asks if (p * a) >= PP_MIN_WALL), None)
@@ -121,7 +120,7 @@ def scan_market(ex_name):
                                 "ticker": symbol, "spread": f"{spread:.2f}%", 
                                 "low": best_bid_wall, "high": best_ask_wall,
                                 "hits": trades_count, "vol_act": trades_vol, "vol": f"> ${PP_MIN_WALL}",
-                                "imbalance": bid_pct # Добавляем процент покупок
+                                "imbalance": bid_pct 
                             })
                     
                     if live_ping_pong:
@@ -155,8 +154,10 @@ def start_scanner():
     global scanner_started
     with lock:
         if not scanner_started:
+            # ТРИ потока сканируют одновременно
             threading.Thread(target=scan_market, args=('bingx',), daemon=True).start()
             threading.Thread(target=scan_market, args=('bitget',), daemon=True).start()
+            threading.Thread(target=scan_market, args=('mexc',), daemon=True).start()
             scanner_started = True
 
 @app.route('/')
