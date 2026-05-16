@@ -7,21 +7,29 @@ import threading
 app = Flask(__name__)
 CORS(app)
 
-exchange = ccxt.bingx({
-    'enableRateLimit': True,
-    'options': {'defaultType': 'spot'}
-})
+# Подключаем две биржи
+exchanges = {
+    'bingx': ccxt.bingx({'enableRateLimit': True, 'options': {'defaultType': 'spot'}}),
+    'bitget': ccxt.bitget({'enableRateLimit': True, 'options': {'defaultType': 'spot'}})
+}
 
-latest_ping_pong = []
-latest_densities = []
+# Раздельная память для каждой биржи
+latest_data = {
+    'bingx': {'ping_pong': [], 'densities': []},
+    'bitget': {'ping_pong': [], 'densities': []}
+}
+
 scanner_started = False
 lock = threading.Lock()
 
-def scan_market():
-    global latest_ping_pong, latest_densities
+# Универсальная функция радара (принимает имя биржи)
+def scan_market(ex_name):
+    exchange = exchanges[ex_name]
+    global latest_data
+    
     while True:
         try:
-            print("\n[РАДАР] Запрашиваю монеты с BingX...", flush=True)
+            print(f"\n[{ex_name.upper()}] Запрашиваю монеты...", flush=True)
             tickers = exchange.fetch_tickers()
             symbols_to_check = []
             
@@ -37,7 +45,7 @@ def scan_market():
             for i, symbol in enumerate(symbols_to_check):
                 try:
                     if i % 10 == 0:
-                        print(f"[{i}/{total_coins}] Сканирую стакан: {symbol}", flush=True)
+                        print(f"[{ex_name.upper()}] [{i}/{total_coins}] Сканирую: {symbol}", flush=True)
 
                     orderbook = exchange.fetch_order_book(symbol, limit=20)
                     bids = orderbook['bids']
@@ -48,25 +56,21 @@ def scan_market():
                         
                     current_price = (bids[0][0] + asks[0][0]) / 2
 
+                    # --- ПЛОТНОСТИ ---
                     DENSITY_MIN_USD = 5000
                     for price, amount in bids:
                         vol_usd = price * amount
                         if vol_usd >= DENSITY_MIN_USD:
                             dist = ((current_price - price) / current_price) * 100
-                            live_densities.append({
-                                "ticker": symbol, "type": "LONG", "price": price, 
-                                "vol": int(vol_usd), "dist": f"{dist:.2f}%"
-                            })
+                            live_densities.append({"ticker": symbol, "type": "LONG", "price": price, "vol": int(vol_usd), "dist": f"{dist:.2f}%"})
                             
                     for price, amount in asks:
                         vol_usd = price * amount
                         if vol_usd >= DENSITY_MIN_USD:
                             dist = ((price - current_price) / current_price) * 100
-                            live_densities.append({
-                                "ticker": symbol, "type": "SHORT", "price": price, 
-                                "vol": int(vol_usd), "dist": f"{dist:.2f}%"
-                            })
+                            live_densities.append({"ticker": symbol, "type": "SHORT", "price": price, "vol": int(vol_usd), "dist": f"{dist:.2f}%"})
 
+                    # --- ПИНГ-ПОНГ ---
                     PP_MIN_WALL = 300 
                     best_bid_wall = next((p for p, a in bids if (p * a) >= PP_MIN_WALL), None)
                     best_ask_wall = next((p for p, a in asks if (p * a) >= PP_MIN_WALL), None)
@@ -94,17 +98,16 @@ def scan_market():
                                 "hits": trades_activity, "vol": f"> ${PP_MIN_WALL}"
                             })
                     
+                    # Обновление данных для текущей биржи
                     if live_ping_pong:
-                        latest_ping_pong = sorted(live_ping_pong, key=lambda x: float(x["spread"].strip('%')), reverse=True)
+                        latest_data[ex_name]['ping_pong'] = sorted(live_ping_pong, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
-                        if i % 3 == 0: 
-                            latest_ping_pong = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
+                        if i % 3 == 0: latest_data[ex_name]['ping_pong'] = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
 
                     if live_densities:
-                        latest_densities = sorted(live_densities, key=lambda x: x["vol"], reverse=True)[:100]
+                        latest_data[ex_name]['densities'] = sorted(live_densities, key=lambda x: x["vol"], reverse=True)[:100]
                     else:
-                        if i % 3 == 0: 
-                            latest_densities = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "type": "-", "price": "-", "vol": "-", "dist": "-"}]
+                        if i % 3 == 0: latest_data[ex_name]['densities'] = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "type": "-", "price": "-", "vol": "-", "dist": "-"}]
 
                     time.sleep(0.2) 
                 except Exception as e:
@@ -112,71 +115,74 @@ def scan_market():
                     continue
             
             if not live_ping_pong:
-                 latest_ping_pong = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
+                 latest_data[ex_name]['ping_pong'] = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
             if not live_densities:
-                 latest_densities = [{"ticker": "ПЛОТНОСТЕЙ НЕТ...", "type": "-", "price": "-", "vol": "-", "dist": "-"}]
+                 latest_data[ex_name]['densities'] = [{"ticker": "ПЛОТНОСТЕЙ НЕТ...", "type": "-", "price": "-", "vol": "-", "dist": "-"}]
             
-            print(f"[РАДАР] Круг завершен! Спим 15 сек...", flush=True)
+            print(f"[{ex_name.upper()}] Круг завершен! Спим 15 сек...", flush=True)
             time.sleep(15)
             
         except Exception as e:
-            print(f"[РАДАР] Глобальная ошибка: {e}", flush=True)
+            print(f"[{ex_name.upper()}] Глобальная ошибка: {e}", flush=True)
             time.sleep(15)
 
 def start_scanner():
     global scanner_started
     with lock:
         if not scanner_started:
-            scanner_thread = threading.Thread(target=scan_market, daemon=True)
-            scanner_thread.start()
+            # Запускаем сразу ДВА независимых радара
+            threading.Thread(target=scan_market, args=('bingx',), daemon=True).start()
+            threading.Thread(target=scan_market, args=('bitget',), daemon=True).start()
             scanner_started = True
 
 @app.route('/')
 def home():
-    return "[SYSTEM_OFFLINE] Ping-Pong Scanner API is running."
+    return "[SYSTEM_OFFLINE] Ping-Pong Multi-Scanner API is running."
 
 @app.route('/api/ping-pong')
 def get_ping_pong_data():
     start_scanner()
-    if not latest_ping_pong:
+    ex_name = request.args.get('exchange', 'bingx')
+    if ex_name not in exchanges: ex_name = 'bingx'
+    
+    data = latest_data[ex_name]['ping_pong']
+    if not data:
          return jsonify([{"ticker": "ИНИЦИАЛИЗАЦИЯ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}])
-    return jsonify(latest_ping_pong)
+    return jsonify(data)
 
 @app.route('/api/densities')
 def get_densities_data():
     start_scanner()
-    if not latest_densities:
+    ex_name = request.args.get('exchange', 'bingx')
+    if ex_name not in exchanges: ex_name = 'bingx'
+    
+    data = latest_data[ex_name]['densities']
+    if not data:
          return jsonify([{"ticker": "ИНИЦИАЛИЗАЦИЯ...", "type": "-", "price": "-", "vol": "-", "dist": "-"}])
-    return jsonify(latest_densities)
+    return jsonify(data)
 
-# ==========================================
-# НОВЫЙ МОДУЛЬ: ОБЩИЙ ПОИСК
-# ==========================================
 @app.route('/api/search')
 def search_ticker():
     ticker = request.args.get('ticker')
-    if not ticker:
-        return jsonify({"error": "Введите тикер"}), 400
+    ex_name = request.args.get('exchange', 'bingx')
+    if ex_name not in exchanges: ex_name = 'bingx'
+    
+    if not ticker: return jsonify({"error": "Введите тикер"}), 400
     
     ticker = ticker.upper().strip()
-    if not ticker.endswith('USDT'):
-        ticker += '/USDT'
-    elif not ticker.endswith('/USDT') and ticker.endswith('USDT'):
-        ticker = ticker.replace('USDT', '/USDT')
+    if not ticker.endswith('USDT'): ticker += '/USDT'
+    elif not ticker.endswith('/USDT') and ticker.endswith('USDT'): ticker = ticker.replace('USDT', '/USDT')
         
     try:
-        # Качаем 50 уровней стакана для надежности
-        orderbook = exchange.fetch_order_book(ticker, limit=50)
+        orderbook = exchanges[ex_name].fetch_order_book(ticker, limit=50)
         bids = orderbook['bids']
         asks = orderbook['asks']
         
-        if not bids or not asks:
-            return jsonify({"error": "Стакан пуст или монета не торгуется"}), 404
+        if not bids or not asks: return jsonify({"error": "Стакан пуст или монета не торгуется"}), 404
             
         current_price = (bids[0][0] + asks[0][0]) / 2
         spread = ((asks[0][0] - bids[0][0]) / bids[0][0]) * 100
         
-        # Ищем ближайшие стенки от $1000
         nearest_bid = next(((p, p*a) for p, a in bids if p * a >= 1000), None)
         nearest_ask = next(((p, p*a) for p, a in asks if p * a >= 1000), None)
         
@@ -188,7 +194,7 @@ def search_ticker():
             "nearest_ask": {"price": nearest_ask[0], "vol": int(nearest_ask[1])} if nearest_ask else None
         })
     except Exception as e:
-        return jsonify({"error": "Монета не найдена на BingX"}), 404
+        return jsonify({"error": f"Монета не найдена на {ex_name.capitalize()}"}), 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
