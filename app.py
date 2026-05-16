@@ -19,6 +19,7 @@ def scan_market():
     global latest_results
     while True:
         try:
+            print("\n[РАДАР] Запрашиваю монеты с биржи BingX...", flush=True)
             tickers = exchange.fetch_tickers()
             symbols_to_check = []
             
@@ -28,10 +29,15 @@ def scan_market():
                         symbols_to_check.append(symbol)
             
             total_coins = len(symbols_to_check)
+            print(f"[РАДАР] Начинаю сканировать {total_coins} стаканов...", flush=True)
             live_results = []
             
             for i, symbol in enumerate(symbols_to_check):
                 try:
+                    # Выводим в лог каждую 10-ю монету, чтобы видеть, что процесс идет
+                    if i % 10 == 0:
+                        print(f"[{i}/{total_coins}] Сканирую...", flush=True)
+
                     orderbook = exchange.fetch_order_book(symbol, limit=20)
                     bids = orderbook['bids']
                     asks = orderbook['asks']
@@ -41,13 +47,13 @@ def scan_market():
                         
                     MIN_WALL_USD = 300 
                     
-                    # Быстрый поиск стенок
                     best_bid_wall = next((price for price, amount in bids if (price * amount) >= MIN_WALL_USD), None)
                     best_ask_wall = next((price for price, amount in asks if (price * amount) >= MIN_WALL_USD), None)
                             
                     if best_bid_wall and best_ask_wall:
                         spread = ((best_ask_wall - best_bid_wall) / best_bid_wall) * 100
                         if spread >= 1.5:
+                            print(f"💰 НАЙДЕН СПРЕД! {symbol} - {spread:.2f}%", flush=True)
                             live_results.append({
                                 "ticker": symbol,
                                 "spread": f"{spread:.2f}%",
@@ -59,10 +65,8 @@ def scan_market():
                     
                     # === ЖИВОЕ ОБНОВЛЕНИЕ ДАННЫХ ДЛЯ САЙТА ===
                     if live_results:
-                        # Если нашли монеты - сразу сортируем и отдаем на сайт
                         latest_results = sorted(live_results, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
-                        # Если пока пусто - показываем счетчик прогресса (обновляем каждые 3 монеты)
                         if i % 3 == 0: 
                             latest_results = [{
                                 "ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...",
@@ -74,17 +78,16 @@ def scan_market():
                     time.sleep(0.2)
                     continue
             
-            # Если круг закончился, а ничего не нашли
             if not live_results:
                  latest_results = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
             
-            # Отдыхаем перед новым кругом
+            print(f"[РАДАР] Круг завершен! Спим 15 сек...", flush=True)
             time.sleep(15)
             
         except Exception as e:
+            print(f"[РАДАР] Глобальная ошибка: {e}", flush=True)
             time.sleep(15)
 
-# Запускаем радар
 scanner_thread = threading.Thread(target=scan_market, daemon=True)
 scanner_thread.start()
 
