@@ -55,6 +55,12 @@ def scan_market(ex_name):
                         
                     current_price = (bids[0][0] + asks[0][0]) / 2
 
+                    # --- АНАЛИЗ ПЕРЕКОСА СТАКАНА ---
+                    total_bid_vol = sum((p * a) for p, a in bids)
+                    total_ask_vol = sum((p * a) for p, a in asks)
+                    total_vol = total_bid_vol + total_ask_vol
+                    bid_pct = int((total_bid_vol / total_vol) * 100) if total_vol > 0 else 50
+
                     # --- ПЛОТНОСТИ ---
                     DENSITY_MIN_USD = 5000
                     for price, amount in bids:
@@ -114,13 +120,14 @@ def scan_market(ex_name):
                             live_ping_pong.append({
                                 "ticker": symbol, "spread": f"{spread:.2f}%", 
                                 "low": best_bid_wall, "high": best_ask_wall,
-                                "hits": trades_count, "vol_act": trades_vol, "vol": f"> ${PP_MIN_WALL}"
+                                "hits": trades_count, "vol_act": trades_vol, "vol": f"> ${PP_MIN_WALL}",
+                                "imbalance": bid_pct # Добавляем процент покупок
                             })
                     
                     if live_ping_pong:
                         latest_data[ex_name]['ping_pong'] = sorted(live_ping_pong, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
-                        if i % 3 == 0: latest_data[ex_name]['ping_pong'] = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-"}]
+                        if i % 3 == 0: latest_data[ex_name]['ping_pong'] = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-", "imbalance": "-"}]
 
                     if live_densities:
                         latest_data[ex_name]['densities'] = sorted(live_densities, key=lambda x: x["vol"], reverse=True)[:100]
@@ -133,7 +140,7 @@ def scan_market(ex_name):
                     continue
             
             if not live_ping_pong:
-                 latest_data[ex_name]['ping_pong'] = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-"}]
+                 latest_data[ex_name]['ping_pong'] = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-", "imbalance": "-"}]
             if not live_densities:
                  latest_data[ex_name]['densities'] = [{"ticker": "ПЛОТНОСТЕЙ НЕТ...", "type": "-", "price": "-", "vol": "-", "dist": "-"}]
             
@@ -164,7 +171,7 @@ def get_ping_pong_data():
     
     data = latest_data[ex_name]['ping_pong']
     if not data:
-         return jsonify([{"ticker": "ИНИЦИАЛИЗАЦИЯ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-"}])
+         return jsonify([{"ticker": "ИНИЦИАЛИЗАЦИЯ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-", "imbalance": "-"}])
     return jsonify(data)
 
 @app.route('/api/densities')
