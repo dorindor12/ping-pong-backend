@@ -18,7 +18,7 @@ def scan_market():
     global latest_results
     while True:
         try:
-            print("\n[РАДАР] Запрашиваю все монеты с биржи BingX...")
+            print("\n[РАДАР] Запрашиваю монеты...", flush=True)
             tickers = exchange.fetch_tickers()
             symbols_to_check = []
             
@@ -27,13 +27,15 @@ def scan_market():
                     if 5000 < ticker['quoteVolume'] < 200000:
                         symbols_to_check.append(symbol)
             
-            print(f"[РАДАР] Отобрано {len(symbols_to_check)} монет. Начинаю сканирование стаканов...")
+            # ДЛЯ ТЕСТА: Оставляем только 10 монет!
+            symbols_to_check = symbols_to_check[:10]
+            
+            print(f"[РАДАР] Начинаю сканировать {len(symbols_to_check)} стаканов...", flush=True)
             temp_results = []
             
             for i, symbol in enumerate(symbols_to_check):
                 try:
-                    # Печатаем в логи сервера каждую монету
-                    print(f"[{i+1}/{len(symbols_to_check)}] Сканирую стакан: {symbol}")
+                    print(f"[{i+1}/{len(symbols_to_check)}] Сканирую: {symbol}", flush=True)
                     
                     orderbook = exchange.fetch_order_book(symbol, limit=20)
                     bids = orderbook['bids']
@@ -60,9 +62,8 @@ def scan_market():
                             
                     if best_bid_wall and best_ask_wall:
                         spread = ((best_ask_wall - best_bid_wall) / best_bid_wall) * 100
-                        
                         if spread >= 1.5:
-                            print(f"💰 НАЙДЕН СПРЕД! {symbol} - {spread:.2f}%")
+                            print(f"💰 НАЙДЕН СПРЕД! {symbol} - {spread:.2f}%", flush=True)
                             temp_results.append({
                                 "ticker": symbol,
                                 "spread": f"{spread:.2f}%",
@@ -72,10 +73,9 @@ def scan_market():
                                 "vol": f"> ${MIN_WALL_USD}"
                             })
                             
-                    # Увеличили паузу, чтобы биржа не давала бан
                     time.sleep(0.2) 
                 except Exception as e:
-                    print(f"Ошибка на {symbol}: {e}")
+                    print(f"Ошибка {symbol}: {e}", flush=True)
                     time.sleep(0.2)
                     continue
             
@@ -90,11 +90,11 @@ def scan_market():
                 })
                 
             latest_results = temp_results
-            print(f"[РАДАР] Круг завершен! Спим 15 секунд...")
+            print(f"[РАДАР] Круг завершен! Спим 15 сек...", flush=True)
             time.sleep(15)
             
         except Exception as e:
-            print(f"[РАДАР] Глобальная ошибка: {e}")
+            print(f"[РАДАР] Глобальная ошибка: {e}", flush=True)
             time.sleep(15)
 
 scanner_thread = threading.Thread(target=scan_market, daemon=True)
