@@ -77,11 +77,13 @@ def scan_market(ex_name):
                     if best_bid_wall and best_ask_wall:
                         spread = ((best_ask_wall - best_bid_wall) / best_bid_wall) * 100
                         if spread >= 1.5:
-                            trades_activity = "~"
+                            trades_count = "~"
+                            trades_vol = "~"
                             try:
-                                # Берем 300 сделок, чтобы захватить 15 минут
                                 trades = exchange.fetch_trades(symbol, limit=300)
                                 curr_ms = int(time.time() * 1000)
+                                
+                                c1, c5, c15 = 0, 0, 0
                                 v1, v5, v15 = 0, 0, 0
                                 
                                 for t in trades:
@@ -91,28 +93,34 @@ def scan_market(ex_name):
                                         if cost is None:
                                             cost = t.get('amount', 0) * t.get('price', 0)
                                             
-                                        if d <= 60000: v1 += cost
-                                        if d <= 300000: v5 += cost
-                                        if d <= 900000: v15 += cost
+                                        if d <= 60000: 
+                                            c1 += 1
+                                            v1 += cost
+                                        if d <= 300000: 
+                                            c5 += 1
+                                            v5 += cost
+                                        if d <= 900000: 
+                                            c15 += 1
+                                            v15 += cost
                                         
-                                # Функция для красивого сокращения тысяч (например 1200 -> 1.2k)
                                 def fmt_v(v):
                                     if v >= 1000: return f"{v/1000:.1f}k"
                                     return str(int(v))
                                     
-                                trades_activity = f"${fmt_v(v1)} / ${fmt_v(v5)} / ${fmt_v(v15)}"
+                                trades_count = f"{c1} / {c5} / {c15}"
+                                trades_vol = f"${fmt_v(v1)} / ${fmt_v(v5)} / ${fmt_v(v15)}"
                             except: pass
                             
                             live_ping_pong.append({
                                 "ticker": symbol, "spread": f"{spread:.2f}%", 
                                 "low": best_bid_wall, "high": best_ask_wall,
-                                "hits": trades_activity, "vol": f"> ${PP_MIN_WALL}"
+                                "hits": trades_count, "vol_act": trades_vol, "vol": f"> ${PP_MIN_WALL}"
                             })
                     
                     if live_ping_pong:
                         latest_data[ex_name]['ping_pong'] = sorted(live_ping_pong, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
-                        if i % 3 == 0: latest_data[ex_name]['ping_pong'] = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
+                        if i % 3 == 0: latest_data[ex_name]['ping_pong'] = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-"}]
 
                     if live_densities:
                         latest_data[ex_name]['densities'] = sorted(live_densities, key=lambda x: x["vol"], reverse=True)[:100]
@@ -125,7 +133,7 @@ def scan_market(ex_name):
                     continue
             
             if not live_ping_pong:
-                 latest_data[ex_name]['ping_pong'] = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
+                 latest_data[ex_name]['ping_pong'] = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-"}]
             if not live_densities:
                  latest_data[ex_name]['densities'] = [{"ticker": "ПЛОТНОСТЕЙ НЕТ...", "type": "-", "price": "-", "vol": "-", "dist": "-"}]
             
@@ -156,7 +164,7 @@ def get_ping_pong_data():
     
     data = latest_data[ex_name]['ping_pong']
     if not data:
-         return jsonify([{"ticker": "ИНИЦИАЛИЗАЦИЯ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}])
+         return jsonify([{"ticker": "ИНИЦИАЛИЗАЦИЯ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol_act": "-", "vol": "-"}])
     return jsonify(data)
 
 @app.route('/api/densities')
