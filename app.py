@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 import ccxt
 import time
@@ -48,11 +48,7 @@ def scan_market():
                         
                     current_price = (bids[0][0] + asks[0][0]) / 2
 
-                    # ==========================================
-                    # СТРАТЕГИЯ 1: ПЛОТНОСТИ (Стенки от $5000)
-                    # ==========================================
                     DENSITY_MIN_USD = 5000
-                    
                     for price, amount in bids:
                         vol_usd = price * amount
                         if vol_usd >= DENSITY_MIN_USD:
@@ -71,9 +67,6 @@ def scan_market():
                                 "vol": int(vol_usd), "dist": f"{dist:.2f}%"
                             })
 
-                    # ==========================================
-                    # СТРАТЕГИЯ 2: ПИНГ-ПОНГ (Спред от 1.5%)
-                    # ==========================================
                     PP_MIN_WALL = 300 
                     best_bid_wall = next((p for p, a in bids if (p * a) >= PP_MIN_WALL), None)
                     best_ask_wall = next((p for p, a in asks if (p * a) >= PP_MIN_WALL), None)
@@ -101,7 +94,6 @@ def scan_market():
                                 "hits": trades_activity, "vol": f"> ${PP_MIN_WALL}"
                             })
                     
-                    # === ОПТИМИЗАЦИЯ ВЫДАЧИ ===
                     if live_ping_pong:
                         latest_ping_pong = sorted(live_ping_pong, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
@@ -109,7 +101,6 @@ def scan_market():
                             latest_ping_pong = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
 
                     if live_densities:
-                        # Берем только ТОП-100 самых крупных стенок, чтобы не вешать браузер
                         latest_densities = sorted(live_densities, key=lambda x: x["vol"], reverse=True)[:100]
                     else:
                         if i % 3 == 0: 
@@ -157,6 +148,47 @@ def get_densities_data():
     if not latest_densities:
          return jsonify([{"ticker": "ИНИЦИАЛИЗАЦИЯ...", "type": "-", "price": "-", "vol": "-", "dist": "-"}])
     return jsonify(latest_densities)
+
+# ==========================================
+# НОВЫЙ МОДУЛЬ: ОБЩИЙ ПОИСК
+# ==========================================
+@app.route('/api/search')
+def search_ticker():
+    ticker = request.args.get('ticker')
+    if not ticker:
+        return jsonify({"error": "Введите тикер"}), 400
+    
+    ticker = ticker.upper().strip()
+    if not ticker.endswith('USDT'):
+        ticker += '/USDT'
+    elif not ticker.endswith('/USDT') and ticker.endswith('USDT'):
+        ticker = ticker.replace('USDT', '/USDT')
+        
+    try:
+        # Качаем 50 уровней стакана для надежности
+        orderbook = exchange.fetch_order_book(ticker, limit=50)
+        bids = orderbook['bids']
+        asks = orderbook['asks']
+        
+        if not bids or not asks:
+            return jsonify({"error": "Стакан пуст или монета не торгуется"}), 404
+            
+        current_price = (bids[0][0] + asks[0][0]) / 2
+        spread = ((asks[0][0] - bids[0][0]) / bids[0][0]) * 100
+        
+        # Ищем ближайшие стенки от $1000
+        nearest_bid = next(((p, p*a) for p, a in bids if p * a >= 1000), None)
+        nearest_ask = next(((p, p*a) for p, a in asks if p * a >= 1000), None)
+        
+        return jsonify({
+            "ticker": ticker,
+            "price": current_price,
+            "spread": f"{spread:.2f}%",
+            "nearest_bid": {"price": nearest_bid[0], "vol": int(nearest_bid[1])} if nearest_bid else None,
+            "nearest_ask": {"price": nearest_ask[0], "vol": int(nearest_ask[1])} if nearest_ask else None
+        })
+    except Exception as e:
+        return jsonify({"error": "Монета не найдена на BingX"}), 404
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000)
