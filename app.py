@@ -30,9 +30,8 @@ def get_ping_pong_data():
                 if 5000 < ticker['quoteVolume'] < 200000:
                     symbols_to_check.append(symbol)
                     
-        # ВАЖНО: Для бесплатного сервера Render ограничиваем проверку до 20 монет за один раз,
-        # иначе сервер не успеет ответить за 30 секунд и выдаст ошибку таймаута.
-      symbols_to_check = symbols_to_check[:3] 
+        # Ограничиваем проверку до 3 монет для теста скорости
+        symbols_to_check = symbols_to_check[:3] 
         
         results = []
         
@@ -41,13 +40,12 @@ def get_ping_pong_data():
             try:
                 # Загружаем стакан (глубина 20 заявок)
                 orderbook = exchange.fetch_order_book(symbol, limit=20)
-                bids = orderbook['bids'] # Покупки [цена, объем монет]
-                asks = orderbook['asks'] # Продажи [цена, объем монет]
+                bids = orderbook['bids']
+                asks = orderbook['asks']
                 
                 if not bids or not asks:
                     continue
                     
-                # Ищем стенки (например, от $300 в одной заявке)
                 MIN_WALL_USD = 300 
                 
                 best_bid_wall = None
@@ -64,28 +62,25 @@ def get_ping_pong_data():
                         best_ask_wall = price
                         break
                         
-                # 4. Считаем спред, если нашли обе стенки
+                # 4. Считаем спред
                 if best_bid_wall and best_ask_wall:
                     spread = ((best_ask_wall - best_bid_wall) / best_bid_wall) * 100
                     
-                    # Забираем в таблицу только жирный спред (больше 1.5%)
                     if spread >= 1.5:
                         results.append({
                             "ticker": symbol,
                             "spread": f"{spread:.2f}%",
                             "low": best_bid_wall,
                             "high": best_ask_wall,
-                            "hits": "~", # Касания пока не считаем, это следующий этап
+                            "hits": "~",
                             "vol": f"> ${MIN_WALL_USD}"
                         })
                         
-                # Маленькая пауза, чтобы биржа не забанила IP за спам
                 time.sleep(0.1) 
                 
             except Exception as e:
-                continue # Если монета зависла, просто пропускаем её
+                continue
                 
-        # Если рынок совсем мертвый и ситуаций нет, выводим заглушку
         if not results:
             results.append({
                 "ticker": "СКАНИРОВАНИЕ...",
