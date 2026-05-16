@@ -22,7 +22,6 @@ latest_data = {
 scanner_started = False
 lock = threading.Lock()
 
-# Универсальная функция радара (принимает имя биржи)
 def scan_market(ex_name):
     exchange = exchanges[ex_name]
     global latest_data
@@ -80,16 +79,28 @@ def scan_market(ex_name):
                         if spread >= 1.5:
                             trades_activity = "~"
                             try:
-                                trades = exchange.fetch_trades(symbol, limit=100)
+                                # Берем 300 сделок, чтобы захватить 15 минут
+                                trades = exchange.fetch_trades(symbol, limit=300)
                                 curr_ms = int(time.time() * 1000)
-                                c1, c5, c15 = 0, 0, 0
+                                v1, v5, v15 = 0, 0, 0
+                                
                                 for t in trades:
                                     if t['timestamp']:
                                         d = curr_ms - t['timestamp']
-                                        if d <= 60000: c1 += 1
-                                        if d <= 300000: c5 += 1
-                                        if d <= 900000: c15 += 1
-                                trades_activity = f"{c1} / {c5} / {c15}"
+                                        cost = t.get('cost')
+                                        if cost is None:
+                                            cost = t.get('amount', 0) * t.get('price', 0)
+                                            
+                                        if d <= 60000: v1 += cost
+                                        if d <= 300000: v5 += cost
+                                        if d <= 900000: v15 += cost
+                                        
+                                # Функция для красивого сокращения тысяч (например 1200 -> 1.2k)
+                                def fmt_v(v):
+                                    if v >= 1000: return f"{v/1000:.1f}k"
+                                    return str(int(v))
+                                    
+                                trades_activity = f"${fmt_v(v1)} / ${fmt_v(v5)} / ${fmt_v(v15)}"
                             except: pass
                             
                             live_ping_pong.append({
@@ -98,7 +109,6 @@ def scan_market(ex_name):
                                 "hits": trades_activity, "vol": f"> ${PP_MIN_WALL}"
                             })
                     
-                    # Обновление данных для текущей биржи
                     if live_ping_pong:
                         latest_data[ex_name]['ping_pong'] = sorted(live_ping_pong, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
@@ -130,7 +140,6 @@ def start_scanner():
     global scanner_started
     with lock:
         if not scanner_started:
-            # Запускаем сразу ДВА независимых радара
             threading.Thread(target=scan_market, args=('bingx',), daemon=True).start()
             threading.Thread(target=scan_market, args=('bitget',), daemon=True).start()
             scanner_started = True
