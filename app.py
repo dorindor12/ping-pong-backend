@@ -108,7 +108,6 @@ def scan_arbitrage():
     while True:
         for ex_name in ['bingx', 'bitget', 'mexc']:
             try:
-                # Получаем все цены одним запросом (очень быстро)
                 spot_tickers = exchanges_spot[ex_name].fetch_tickers()
                 swap_tickers = exchanges_swap[ex_name].fetch_tickers()
                 
@@ -117,7 +116,7 @@ def scan_arbitrage():
                     if not spot_sym.endswith('/USDT'): continue
                     
                     base_coin = spot_sym.split('/')[0]
-                    swap_sym = f"{base_coin}/USDT:USDT" # Формат фьючерса в CCXT
+                    swap_sym = f"{base_coin}/USDT:USDT" # Формат фьючерса
                     
                     if swap_sym in swap_tickers:
                         spot_price = spot_data.get('last')
@@ -129,19 +128,33 @@ def scan_arbitrage():
                             # Ищем разрыв больше 1%
                             if abs(spread) >= 1.0:
                                 action = "🔴 ПРОДАТЬ ФЬЮЧ + КУПИТЬ СПОТ" if spread > 0 else "🟢 КУПИТЬ ФЬЮЧ + ПРОДАТЬ СПОТ"
+                                
+                                # Запрашиваем стакан СПОТА только для этой монеты
+                                imbalance = "-"
+                                try:
+                                    ob = exchanges_spot[ex_name].fetch_order_book(spot_sym, limit=20)
+                                    bids, asks = ob['bids'], ob['asks']
+                                    if bids and asks:
+                                        tb = sum(p*a for p, a in bids)
+                                        ta = sum(p*a for p, a in asks)
+                                        imbalance = int((tb / (tb+ta)) * 100) if (tb+ta) > 0 else 50
+                                    time.sleep(0.1) # Защита от бана
+                                except: pass
+                                
                                 arb_list.append({
                                     "ticker": base_coin,
                                     "spot_price": spot_price,
                                     "swap_price": swap_price,
                                     "spread": f"{spread:.2f}%",
                                     "action": action,
-                                    "raw_spread": abs(spread)
+                                    "raw_spread": abs(spread),
+                                    "imbalance": imbalance
                                 })
                 
                 if arb_list:
                     latest_data[ex_name]['arbitrage'] = sorted(arb_list, key=lambda x: x['raw_spread'], reverse=True)
                 else:
-                    latest_data[ex_name]['arbitrage'] = [{"ticker": "РАЗРЫВОВ НЕТ", "spot_price": "-", "swap_price": "-", "spread": "-", "action": "-"}]
+                    latest_data[ex_name]['arbitrage'] = [{"ticker": "РАЗРЫВОВ НЕТ", "spot_price": "-", "swap_price": "-", "spread": "-", "action": "-", "imbalance": "-"}]
                     
             except Exception as e:
                 print(f"[ARB ERROR {ex_name}]: {e}")
@@ -154,7 +167,7 @@ def start_scanner():
             threading.Thread(target=scan_spot, args=('bingx',), daemon=True).start()
             threading.Thread(target=scan_spot, args=('bitget',), daemon=True).start()
             threading.Thread(target=scan_spot, args=('mexc',), daemon=True).start()
-            threading.Thread(target=scan_arbitrage, daemon=True).start() # Запускаем радар арбитража
+            threading.Thread(target=scan_arbitrage, daemon=True).start()
             scanner_started = True
 
 @app.route('/')
