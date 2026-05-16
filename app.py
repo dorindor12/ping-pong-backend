@@ -32,7 +32,7 @@ def get_ping_pong_data():
                     
         # ВАЖНО: Для бесплатного сервера Render ограничиваем проверку до 20 монет за один раз,
         # иначе сервер не успеет ответить за 30 секунд и выдаст ошибку таймаута.
-        symbols_to_check = symbols_to_check[:20] 
+      symbols_to_check = symbols_to_check[:3] 
         
         results = []
         
