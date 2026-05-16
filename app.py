@@ -12,14 +12,17 @@ exchange = ccxt.bingx({
     'options': {'defaultType': 'spot'}
 })
 
-# Заглушка при самом первом старте
-latest_results = [{"ticker": "ЗАПУСК РАДАРА...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
+# Изначально база пустая
+latest_results = []
+# Флаги для безопасного запуска потока внутри активного воркера
+scanner_started = False
+lock = threading.Lock()
 
 def scan_market():
     global latest_results
     while True:
         try:
-            print("\n[РАДАР] Запрашиваю монеты с биржи BingX...", flush=True)
+            print("\n[РАДАР] Фоновый поток запущен! Запрашиваю монеты с BingX...", flush=True)
             tickers = exchange.fetch_tickers()
             symbols_to_check = []
             
@@ -29,14 +32,13 @@ def scan_market():
                         symbols_to_check.append(symbol)
             
             total_coins = len(symbols_to_check)
-            print(f"[РАДАР] Начинаю сканировать {total_coins} стаканов...", flush=True)
+            print(f"[РАДАР] Найдено {total_coins} неликвидных пар. Начинаю анализ стаканов...", flush=True)
             live_results = []
             
             for i, symbol in enumerate(symbols_to_check):
                 try:
-                    # Выводим в лог каждую 10-ю монету, чтобы видеть, что процесс идет
                     if i % 10 == 0:
-                        print(f"[{i}/{total_coins}] Сканирую...", flush=True)
+                        print(f"[{i}/{total_coins}] Сканирую стакан: {symbol}", flush=True)
 
                     orderbook = exchange.fetch_order_book(symbol, limit=20)
                     bids = orderbook['bids']
@@ -63,7 +65,7 @@ def scan_market():
                                 "vol": f"> ${MIN_WALL_USD}"
                             })
                     
-                    # === ЖИВОЕ ОБНОВЛЕНИЕ ДАННЫХ ДЛЯ САЙТА ===
+                    # Живое обновление данных в процессе круга
                     if live_results:
                         latest_results = sorted(live_results, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
@@ -81,15 +83,13 @@ def scan_market():
             if not live_results:
                  latest_results = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
             
-            print(f"[РАДАР] Круг завершен! Спим 15 сек...", flush=True)
+            print(f"[РАДАР] Круг полностью завершен! Спим 15 сек...", flush=True)
             time.sleep(15)
             
         except Exception as e:
-            print(f"[РАДАР] Глобальная ошибка: {e}", flush=True)
+            print(f"[РАДАР] Глобальная ошибка в потоке: {e}", flush=True)
             time.sleep(15)
 
-scanner_thread = threading.Thread(target=scan_market, daemon=True)
-scanner_thread.start()
 
 @app.route('/')
 def home():
@@ -97,6 +97,24 @@ def home():
 
 @app.route('/api/ping-pong')
 def get_ping_pong_data():
+    global scanner_started
+    
+    # ХИТРОСТЬ: Запускаем поток радара строго внутри процесса, который принял запрос от сайта
+    if not scanner_started:
+        with lock:
+            if not scanner_started:
+                print("[СЕРВЕР] Принят первый запрос от сайта. Запускаю радар внутри рабочего воркера...", flush=True)
+                scanner_thread = threading.Thread(target=scan_market, daemon=True)
+                scanner_thread.start()
+                scanner_started = True
+
+    # Если радар только запустился и еще не успел переписать пустой массив
+    if not latest_results:
+         return jsonify([{
+            "ticker": "ИНИЦИАЛИЗАЦИЯ РАДАРА...",
+            "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"
+        }])
+        
     return jsonify(latest_results)
 
 if __name__ == '__main__':
