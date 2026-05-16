@@ -12,10 +12,8 @@ exchange = ccxt.bingx({
     'options': {'defaultType': 'spot'}
 })
 
-# Память для двух стратегий
 latest_ping_pong = []
 latest_densities = []
-
 scanner_started = False
 lock = threading.Lock()
 
@@ -51,9 +49,9 @@ def scan_market():
                     current_price = (bids[0][0] + asks[0][0]) / 2
 
                     # ==========================================
-                    # СТРАТЕГИЯ 1: ПЛОТНОСТИ (Стенки от $1000)
+                    # СТРАТЕГИЯ 1: ПЛОТНОСТИ (Стенки от $5000)
                     # ==========================================
-                    DENSITY_MIN_USD = 1000
+                    DENSITY_MIN_USD = 5000
                     
                     for price, amount in bids:
                         vol_usd = price * amount
@@ -103,7 +101,7 @@ def scan_market():
                                 "hits": trades_activity, "vol": f"> ${PP_MIN_WALL}"
                             })
                     
-                    # Живое обновление
+                    # === ОПТИМИЗАЦИЯ ВЫДАЧИ ===
                     if live_ping_pong:
                         latest_ping_pong = sorted(live_ping_pong, key=lambda x: float(x["spread"].strip('%')), reverse=True)
                     else:
@@ -111,8 +109,8 @@ def scan_market():
                             latest_ping_pong = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
 
                     if live_densities:
-                        # Сортируем плотности по объему (от самых больших к меньшим)
-                        latest_densities = sorted(live_densities, key=lambda x: x["vol"], reverse=True)
+                        # Берем только ТОП-100 самых крупных стенок, чтобы не вешать браузер
+                        latest_densities = sorted(live_densities, key=lambda x: x["vol"], reverse=True)[:100]
                     else:
                         if i % 3 == 0: 
                             latest_densities = [{"ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...", "type": "-", "price": "-", "vol": "-", "dist": "-"}]
@@ -134,7 +132,6 @@ def scan_market():
             print(f"[РАДАР] Глобальная ошибка: {e}", flush=True)
             time.sleep(15)
 
-# Функция запуска потока
 def start_scanner():
     global scanner_started
     with lock:
