@@ -12,13 +12,13 @@ exchange = ccxt.bingx({
     'options': {'defaultType': 'spot'}
 })
 
-latest_results = []
+# Заглушка при самом первом старте
+latest_results = [{"ticker": "ЗАПУСК РАДАРА...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
 
 def scan_market():
     global latest_results
     while True:
         try:
-            print("\n[РАДАР] Запрашиваю монеты...", flush=True)
             tickers = exchange.fetch_tickers()
             symbols_to_check = []
             
@@ -27,16 +27,11 @@ def scan_market():
                     if 5000 < ticker['quoteVolume'] < 200000:
                         symbols_to_check.append(symbol)
             
-            # ДЛЯ ТЕСТА: Оставляем только 10 монет!
-            symbols_to_check = symbols_to_check[:10]
-            
-            print(f"[РАДАР] Начинаю сканировать {len(symbols_to_check)} стаканов...", flush=True)
-            temp_results = []
+            total_coins = len(symbols_to_check)
+            live_results = []
             
             for i, symbol in enumerate(symbols_to_check):
                 try:
-                    print(f"[{i+1}/{len(symbols_to_check)}] Сканирую: {symbol}", flush=True)
-                    
                     orderbook = exchange.fetch_order_book(symbol, limit=20)
                     bids = orderbook['bids']
                     asks = orderbook['asks']
@@ -46,25 +41,14 @@ def scan_market():
                         
                     MIN_WALL_USD = 300 
                     
-                    best_bid_wall = None
-                    for bid in bids:
-                        price, amount = bid[0], bid[1]
-                        if (price * amount) >= MIN_WALL_USD:
-                            best_bid_wall = price
-                            break
-                            
-                    best_ask_wall = None
-                    for ask in asks:
-                        price, amount = ask[0], ask[1]
-                        if (price * amount) >= MIN_WALL_USD:
-                            best_ask_wall = price
-                            break
+                    # Быстрый поиск стенок
+                    best_bid_wall = next((price for price, amount in bids if (price * amount) >= MIN_WALL_USD), None)
+                    best_ask_wall = next((price for price, amount in asks if (price * amount) >= MIN_WALL_USD), None)
                             
                     if best_bid_wall and best_ask_wall:
                         spread = ((best_ask_wall - best_bid_wall) / best_bid_wall) * 100
                         if spread >= 1.5:
-                            print(f"💰 НАЙДЕН СПРЕД! {symbol} - {spread:.2f}%", flush=True)
-                            temp_results.append({
+                            live_results.append({
                                 "ticker": symbol,
                                 "spread": f"{spread:.2f}%",
                                 "low": best_bid_wall,
@@ -72,31 +56,35 @@ def scan_market():
                                 "hits": "~",
                                 "vol": f"> ${MIN_WALL_USD}"
                             })
-                            
+                    
+                    # === ЖИВОЕ ОБНОВЛЕНИЕ ДАННЫХ ДЛЯ САЙТА ===
+                    if live_results:
+                        # Если нашли монеты - сразу сортируем и отдаем на сайт
+                        latest_results = sorted(live_results, key=lambda x: float(x["spread"].strip('%')), reverse=True)
+                    else:
+                        # Если пока пусто - показываем счетчик прогресса (обновляем каждые 3 монеты)
+                        if i % 3 == 0: 
+                            latest_results = [{
+                                "ticker": f"СКАНИРОВАНИЕ ({i}/{total_coins})...",
+                                "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"
+                            }]
+
                     time.sleep(0.2) 
                 except Exception as e:
-                    print(f"Ошибка {symbol}: {e}", flush=True)
                     time.sleep(0.2)
                     continue
             
-            if not temp_results:
-                temp_results.append({
-                    "ticker": "ЖДЕМ СИТУАЦИЙ...",
-                    "spread": "-",
-                    "low": "-",
-                    "high": "-",
-                    "hits": "-",
-                    "vol": "-"
-                })
-                
-            latest_results = temp_results
-            print(f"[РАДАР] Круг завершен! Спим 15 сек...", flush=True)
+            # Если круг закончился, а ничего не нашли
+            if not live_results:
+                 latest_results = [{"ticker": "ЖДЕМ СИТУАЦИЙ...", "spread": "-", "low": "-", "high": "-", "hits": "-", "vol": "-"}]
+            
+            # Отдыхаем перед новым кругом
             time.sleep(15)
             
         except Exception as e:
-            print(f"[РАДАР] Глобальная ошибка: {e}", flush=True)
             time.sleep(15)
 
+# Запускаем радар
 scanner_thread = threading.Thread(target=scan_market, daemon=True)
 scanner_thread.start()
 
@@ -106,15 +94,6 @@ def home():
 
 @app.route('/api/ping-pong')
 def get_ping_pong_data():
-    if not latest_results:
-         return jsonify([{
-            "ticker": "ИНИЦИАЛИЗАЦИЯ РАДАРА...",
-            "spread": "-",
-            "low": "-",
-            "high": "-",
-            "hits": "-",
-            "vol": "-"
-        }])
     return jsonify(latest_results)
 
 if __name__ == '__main__':
