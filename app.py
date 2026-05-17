@@ -27,6 +27,12 @@ latest_data = {
     'mexc': {'ping_pong': [], 'densities': [], 'arbitrage': []}
 }
 
+# ГЛОБАЛЬНЫЕ НАСТРОЙКИ СЕРВЕРА (можно менять с сайта на лету)
+scanner_settings = {
+    'min_pp': 300,
+    'min_den': 5000
+}
+
 scanner_started = False
 lock = threading.Lock()
 
@@ -43,6 +49,10 @@ def scan_spot(ex_name):
             live_ping_pong = []
             live_densities = []
             
+            # Читаем актуальные настройки перед кругом
+            current_min_den = scanner_settings['min_den']
+            current_min_pp = scanner_settings['min_pp']
+            
             for i, symbol in enumerate(symbols_to_check):
                 try:
                     orderbook = exchange.fetch_order_book(symbol, limit=20)
@@ -55,17 +65,17 @@ def scan_spot(ex_name):
                     total_vol = total_bid_vol + total_ask_vol
                     bid_pct = int((total_bid_vol / total_vol) * 100) if total_vol > 0 else 50
 
-                    DENSITY_MIN_USD = 5000
+                    # Плотности берем из динамической настройки
                     for price, amount in bids:
-                        if price * amount >= DENSITY_MIN_USD:
+                        if price * amount >= current_min_den:
                             live_densities.append({"ticker": symbol, "type": "LONG", "price": price, "vol": int(price * amount), "dist": f"{((current_price - price) / current_price) * 100:.2f}%"})
                     for price, amount in asks:
-                        if price * amount >= DENSITY_MIN_USD:
+                        if price * amount >= current_min_den:
                             live_densities.append({"ticker": symbol, "type": "SHORT", "price": price, "vol": int(price * amount), "dist": f"{((price - current_price) / current_price) * 100:.2f}%"})
 
-                    PP_MIN_WALL = 300 
-                    best_bid_wall = next((p for p, a in bids if (p * a) >= PP_MIN_WALL), None)
-                    best_ask_wall = next((p for p, a in asks if (p * a) >= PP_MIN_WALL), None)
+                    # Стенки пинг-понга берем из динамической настройки
+                    best_bid_wall = next((p for p, a in bids if (p * a) >= current_min_pp), None)
+                    best_ask_wall = next((p for p, a in asks if (p * a) >= current_min_pp), None)
                             
                     if best_bid_wall and best_ask_wall:
                         spread = ((best_ask_wall - best_bid_wall) / best_bid_wall) * 100
@@ -89,7 +99,7 @@ def scan_spot(ex_name):
                             
                             live_ping_pong.append({
                                 "ticker": symbol, "spread": f"{spread:.2f}%", "low": best_bid_wall, "high": best_ask_wall,
-                                "hits": trades_count, "vol_act": trades_vol, "vol": f"> ${PP_MIN_WALL}", "imbalance": bid_pct 
+                                "hits": trades_count, "vol_act": trades_vol, "vol": f"> ${current_min_pp}", "imbalance": bid_pct 
                             })
                     
                     if live_ping_pong: latest_data[ex_name]['ping_pong'] = sorted(live_ping_pong, key=lambda x: float(x["spread"].strip('%')), reverse=True)
@@ -102,7 +112,7 @@ def scan_spot(ex_name):
             time.sleep(15)
         except: time.sleep(15)
 
-# --- 2. СКАНЕР АРБИТРАЖА (Спот vs Фьючерс) ---
+# --- 2. СКАНЕР АРБИТРАЖА ---
 def scan_arbitrage():
     global latest_data
     while True:
@@ -116,7 +126,7 @@ def scan_arbitrage():
                     if not spot_sym.endswith('/USDT'): continue
                     
                     base_coin = spot_sym.split('/')[0]
-                    swap_sym = f"{base_coin}/USDT:USDT" # Формат фьючерса
+                    swap_sym = f"{base_coin}/USDT:USDT"
                     
                     if swap_sym in swap_tickers:
                         spot_price = spot_data.get('last')
@@ -125,11 +135,8 @@ def scan_arbitrage():
                         if spot_price and swap_price and spot_price > 0:
                             spread = ((swap_price - spot_price) / spot_price) * 100
                             
-                            # Ищем разрыв больше 1%
                             if abs(spread) >= 1.0:
                                 action = "🔴 ПРОДАТЬ ФЬЮЧ + КУПИТЬ СПОТ" if spread > 0 else "🟢 КУПИТЬ ФЬЮЧ + ПРОДАТЬ СПОТ"
-                                
-                                # Запрашиваем стакан СПОТА только для этой монеты
                                 imbalance = "-"
                                 try:
                                     ob = exchanges_spot[ex_name].fetch_order_book(spot_sym, limit=20)
@@ -138,27 +145,18 @@ def scan_arbitrage():
                                         tb = sum(p*a for p, a in bids)
                                         ta = sum(p*a for p, a in asks)
                                         imbalance = int((tb / (tb+ta)) * 100) if (tb+ta) > 0 else 50
-                                    time.sleep(0.1) # Защита от бана
+                                    time.sleep(0.1)
                                 except: pass
                                 
                                 arb_list.append({
-                                    "ticker": base_coin,
-                                    "spot_price": spot_price,
-                                    "swap_price": swap_price,
-                                    "spread": f"{spread:.2f}%",
-                                    "action": action,
-                                    "raw_spread": abs(spread),
-                                    "imbalance": imbalance
+                                    "ticker": base_coin, "spot_price": spot_price, "swap_price": swap_price,
+                                    "spread": f"{spread:.2f}%", "action": action, "raw_spread": abs(spread), "imbalance": imbalance
                                 })
                 
-                if arb_list:
-                    latest_data[ex_name]['arbitrage'] = sorted(arb_list, key=lambda x: x['raw_spread'], reverse=True)
-                else:
-                    latest_data[ex_name]['arbitrage'] = [{"ticker": "РАЗРЫВОВ НЕТ", "spot_price": "-", "swap_price": "-", "spread": "-", "action": "-", "imbalance": "-"}]
-                    
-            except Exception as e:
-                print(f"[ARB ERROR {ex_name}]: {e}")
-        time.sleep(10) # Обновляем арбитраж каждые 10 секунд
+                if arb_list: latest_data[ex_name]['arbitrage'] = sorted(arb_list, key=lambda x: x['raw_spread'], reverse=True)
+                else: latest_data[ex_name]['arbitrage'] = [{"ticker": "РАЗРЫВОВ НЕТ", "spot_price": "-", "swap_price": "-", "spread": "-", "action": "-", "imbalance": "-"}]
+            except: pass
+        time.sleep(10)
 
 def start_scanner():
     global scanner_started
@@ -170,22 +168,34 @@ def start_scanner():
             threading.Thread(target=scan_arbitrage, daemon=True).start()
             scanner_started = True
 
+def update_settings_from_request():
+    min_pp = request.args.get('min_pp', type=int)
+    min_den = request.args.get('min_den', type=int)
+    if min_pp is not None and min_pp >= 1: scanner_settings['min_pp'] = min_pp
+    if min_den is not None and min_den >= 1: scanner_settings['min_den'] = min_den
+
 @app.route('/')
 def home(): return "[SYSTEM_ONLINE] Multi-Scanner API"
 
 @app.route('/api/ping-pong')
 def get_ping_pong_data():
-    start_scanner(); ex = request.args.get('exchange', 'bingx')
+    start_scanner()
+    update_settings_from_request()
+    ex = request.args.get('exchange', 'bingx')
     return jsonify(latest_data.get(ex, latest_data['bingx'])['ping_pong'] or [{"ticker": "ИНИЦИАЛИЗАЦИЯ..."}])
 
 @app.route('/api/densities')
 def get_densities_data():
-    start_scanner(); ex = request.args.get('exchange', 'bingx')
+    start_scanner()
+    update_settings_from_request()
+    ex = request.args.get('exchange', 'bingx')
     return jsonify(latest_data.get(ex, latest_data['bingx'])['densities'] or [{"ticker": "ИНИЦИАЛИЗАЦИЯ..."}])
 
 @app.route('/api/arbitrage')
 def get_arbitrage_data():
-    start_scanner(); ex = request.args.get('exchange', 'bingx')
+    start_scanner()
+    update_settings_from_request()
+    ex = request.args.get('exchange', 'bingx')
     return jsonify(latest_data.get(ex, latest_data['bingx'])['arbitrage'] or [{"ticker": "ИНИЦИАЛИЗАЦИЯ..."}])
 
 @app.route('/api/search')
@@ -202,8 +212,10 @@ def search_ticker():
         if not bids or not asks: return jsonify({"error": "Стакан пуст"}), 404
         cp = (bids[0][0] + asks[0][0]) / 2
         spr = ((asks[0][0] - bids[0][0]) / bids[0][0]) * 100
-        nb = next(((p, p*a) for p, a in bids if p * a >= 1000), None)
-        na = next(((p, p*a) for p, a in asks if p * a >= 1000), None)
+        # В поиске тоже используем динамическую настройку для отображения ближайших стенок
+        current_min_den = scanner_settings['min_den']
+        nb = next(((p, p*a) for p, a in bids if p * a >= current_min_den), None)
+        na = next(((p, p*a) for p, a in asks if p * a >= current_min_den), None)
         return jsonify({"ticker": ticker, "price": cp, "spread": f"{spr:.2f}%", "nearest_bid": {"price": nb[0], "vol": int(nb[1])} if nb else None, "nearest_ask": {"price": na[0], "vol": int(na[1])} if na else None})
     except: return jsonify({"error": "Монета не найдена"}), 404
 
